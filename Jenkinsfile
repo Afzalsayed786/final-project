@@ -18,7 +18,7 @@ pipeline {
             steps {
                 sh '''
                     docker rm -f final-project-test || true
-                    docker run -d --name final-project-test -p 5000:5000 final-project-app:latest
+                    docker run -d --name final-project-test --network container:jenkins final-project-app:latest
 
                     for i in $(seq 1 15); do
                         if curl -fsS http://localhost:5000; then
