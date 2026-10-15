@@ -1,5 +1,13 @@
-# Terraform
+# Terraform working directory and downloaded providers
 .terraform/
+
+# Terraform state and state backups
 *.tfstate
 *.tfstate.*
-.terraform.lock.hcl
+
+# Local Terraform variable files may contain environment-specific values
+terraform/terraform.tfvars
+
+# Crash logs
+crash.log
+crash.*.log

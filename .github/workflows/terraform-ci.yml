@@ -1,0 +1,89 @@
+# Name shown in the GitHub Actions tab.
+name: Terraform CI/CD
+
+# Run checks for Terraform changes and the workflow itself.
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform-ci.yml'
+
+  push:
+    branches:
+      - main
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform-ci.yml'
+
+# Give jobs read-only repository access by default.
+permissions:
+  contents: read
+
+jobs:
+  # Job 1: Check Terraform code without accessing AWS.
+  terraform-checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Download the repository code.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Install the same Terraform CLI version used locally.
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.15.6'
+
+      # Check formatting without changing any files.
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive terraform
+
+      # Initialize providers but deliberately skip the S3 backend.
+      - name: Initialize Terraform for validation
+        run: terraform -chdir=terraform init -backend=false -input=false
+
+      # Validate the Terraform configuration.
+      - name: Validate Terraform
+        run: terraform -chdir=terraform validate
+
+  # Job 2: Generate an infrastructure plan on main only.
+  terraform-plan:
+    # Do not request AWS credentials for pull requests.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: terraform-checks
+    runs-on: ubuntu-latest
+
+    # GitHub needs this permission to issue an OIDC token.
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      # Download the repository code.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Install Terraform.
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.15.6'
+
+      # Exchange the GitHub OIDC token for temporary AWS credentials.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::295028317770:role/FinalProjectTerraformGitHubRole
+          aws-region: eu-north-1
+
+      # Initialize the actual S3 backend and provider.
+      - name: Initialize Terraform with S3
+        run: terraform -chdir=terraform init -input=false
+
+      # Generate a plan to review proposed infrastructure changes.
+      # This job does not run terraform apply.
+      - name: Create Terraform plan
+        run: terraform -chdir=terraform plan -input=false -no-color

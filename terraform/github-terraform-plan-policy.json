@@ -1,0 +1,54 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListProjectStatePrefix",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::final-project-terraform-state-295028317770",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "final-project",
+            "final-project/*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ReadAndWriteProjectState",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::final-project-terraform-state-295028317770/final-project/terraform.tfstate"
+    },
+    {
+      "Sid": "ManageProjectStateLock",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::final-project-terraform-state-295028317770/final-project/terraform.tfstate.tflock"
+    },
+    {
+      "Sid": "InspectInfrastructure",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeImages",
+        "ec2:DescribeInstances",
+        "ec2:DescribeInstanceTypes",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeVpcs",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DescribeAvailabilityZones",
+        "ec2:DescribeTags"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
