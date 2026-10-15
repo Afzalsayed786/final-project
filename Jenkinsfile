@@ -17,18 +17,33 @@ pipeline {
         stage('Test Application') {
             steps {
                 sh '''
+                    docker rm -f final-project-test || true
                     docker run -d --name final-project-test -p 5000:5000 final-project-app:latest
-                    sleep 5
-                    curl -f http://localhost:5000
+
+                    for i in $(seq 1 15); do
+                        if curl -fsS http://localhost:5000; then
+                            echo "Application test passed!"
+                            exit 0
+                        fi
+                        sleep 2
+                    done
+
+                    docker logs final-project-test
+                    exit 1
                 '''
             }
         }
+    }
 
-        stage('Cleanup') {
-            steps {
-                sh 'docker rm -f final-project-test || true'
-            }
+    post {
+        always {
+            sh 'docker rm -f final-project-test || true'
+        }
+        success {
+            echo 'Jenkins pipeline completed successfully!'
+        }
+        failure {
+            echo 'Jenkins pipeline failed. Check the Console Output.'
         }
     }
 }
-
