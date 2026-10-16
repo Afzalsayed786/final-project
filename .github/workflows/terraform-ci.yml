@@ -1,8 +1,10 @@
-# Name shown in the GitHub Actions tab.
+
+# Name displayed in the GitHub Actions tab.
 name: Terraform CI/CD
 
-# Run checks for Terraform changes and the workflow itself.
+# Run this workflow when Terraform files or this workflow change.
 on:
+  # Check pull requests targeting the main branch.
   pull_request:
     branches:
       - main
@@ -10,6 +12,7 @@ on:
       - 'terraform/**'
       - '.github/workflows/terraform-ci.yml'
 
+  # Run checks and deployment when changes are pushed to main.
   push:
     branches:
       - main
@@ -22,47 +25,99 @@ permissions:
   contents: read
 
 jobs:
-  # Job 1: Check Terraform code without accessing AWS.
+  # JOB 1: Check Terraform formatting and configuration.
   terraform-checks:
     runs-on: ubuntu-latest
 
     steps:
-      # Download the repository code.
+      # Download the repository code to the GitHub runner.
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Install the same Terraform CLI version used locally.
+      # Install the Terraform CLI.
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: '1.15.6'
 
-      # Check formatting without changing any files.
+      # Check formatting without changing the files.
       - name: Check Terraform formatting
         run: terraform fmt -check -recursive terraform
 
-      # Initialize providers but deliberately skip the S3 backend.
+      # Initialize providers without connecting to the S3 backend.
+      # This job only validates the configuration.
       - name: Initialize Terraform for validation
         run: terraform -chdir=terraform init -backend=false -input=false
 
-      # Validate the Terraform configuration.
+      # Check Terraform configuration for errors.
       - name: Validate Terraform
         run: terraform -chdir=terraform validate
 
-  # Job 2: Generate an infrastructure plan on main only.
+  # JOB 2: Create a Terraform plan on pushes to main.
   terraform-plan:
-    # Do not request AWS credentials for pull requests.
+    # Do not run the AWS planning job for pull requests.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    # Run only after formatting and validation succeed.
     needs: terraform-checks
     runs-on: ubuntu-latest
 
-    # GitHub needs this permission to issue an OIDC token.
+    # Allow GitHub to request an OIDC token for AWS authentication.
     permissions:
       contents: read
       id-token: write
 
     steps:
-      # Download the repository code.
+      # Download the project files.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Install the required Terraform version.
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.15.6'
+
+      # Use GitHub OIDC to obtain temporary AWS credentials.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::295028317770:role/FinalProjectTerraformGitHubRole
+          aws-region: eu-north-1
+
+      # Initialize Terraform using the configured S3 remote backend.
+      - name: Initialize Terraform with S3
+        run: terraform -chdir=terraform init -input=false
+
+      # Generate and save a plan for the apply job.
+      # This command previews changes; it does not create resources.
+      - name: Create Terraform plan
+        run: terraform -chdir=terraform plan -input=false -no-color -out=tfplan
+
+      # Upload the saved plan so the next job can use the same plan.
+      - name: Upload Terraform plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: terraform/tfplan
+          retention-days: 1
+
+  # JOB 3: Apply the saved Terraform plan on pushes to main.
+  terraform-apply:
+    # Only deploy from the main branch after a push.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    # Do not apply unless the plan job succeeds.
+    needs: terraform-plan
+    runs-on: ubuntu-latest
+
+    # Allow this job to authenticate to AWS through OIDC.
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      # Download the same repository revision used by the workflow.
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -72,18 +127,25 @@ jobs:
         with:
           terraform_version: '1.15.6'
 
-      # Exchange the GitHub OIDC token for temporary AWS credentials.
+      # Download the saved plan from the previous job.
+      - name: Download Terraform plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan
+          path: terraform
+
+      # Obtain temporary AWS credentials through GitHub OIDC.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::295028317770:role/FinalProjectTerraformGitHubRole
           aws-region: eu-north-1
 
-      # Initialize the actual S3 backend and provider.
+      # Connect Terraform to the S3 remote state backend.
       - name: Initialize Terraform with S3
         run: terraform -chdir=terraform init -input=false
 
-      # Generate a plan to review proposed infrastructure changes.
-      # This job does not run terraform apply.
-      - name: Create Terraform plan
-        run: terraform -chdir=terraform plan -input=false -no-color
+      # Apply the saved plan rather than creating a new plan.
+      # This can create or modify real AWS resources.
+      - name: Apply reviewed Terraform plan
+        run: terraform -chdir=terraform apply -input=false -auto-approve tfplan
